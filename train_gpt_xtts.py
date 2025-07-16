@@ -1,6 +1,6 @@
 import os
 import gc
-
+import shutil 
 from trainer import Trainer, TrainerArgs
 
 from TTS.config.shared_configs import BaseDatasetConfig
@@ -13,6 +13,8 @@ from typing import Optional
 from transformers import HfArgumentParser
 
 import argparse
+import torch
+
 
 def create_xtts_trainer_parser():
     parser = argparse.ArgumentParser(description="Arguments for XTTS Trainer")
@@ -40,7 +42,445 @@ def create_xtts_trainer_parser():
 
     return parser
 
+def save_best_model(ckpt_dir):
+    import torch, shutil, os
+    best_loss = float("inf")
+    best_ckpt = None
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            try:
+                ckpt = torch.load(fpath, map_location="cpu")
+                loss = ckpt.get("model_loss", None)
+                loss_val = None
+                if isinstance(loss, dict):
+                    # Prefer eval_loss if it's a number
+                    if "eval_loss" in loss and isinstance(loss["eval_loss"], (float, int)):
+                        loss_val = loss["eval_loss"]
+                    elif "train_loss" in loss and isinstance(loss["train_loss"], (float, int)):
+                        loss_val = loss["train_loss"]
+                    elif "loss" in loss and isinstance(loss["loss"], (float, int)):
+                        loss_val = loss["loss"]
+                    else:
+                        # Try first valid numeric value
+                        for v in loss.values():
+                            if isinstance(v, (float, int)):
+                                loss_val = v
+                                break
+                elif isinstance(loss, (float, int)):
+                    loss_val = loss
+                if loss_val is not None and isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+                else:
+                    print(f"⚠️ No valid loss found in {fname} (loss={loss}, extracted={loss_val})")
+            except Exception as e:
+                print(f"⚠️ Failed to process {fname}: {e}")
 
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No valid checkpoint found to select as best!")
+
+    """
+    Scan all checkpoints in ckpt_dir, find the one with the lowest eval_loss (or train_loss/loss as fallback),
+    and copy it to 'best_model.pth'.
+    """
+    best_loss = float("inf")
+    best_ckpt = None
+    found_any = False
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            found_any = True
+            fpath = os.path.join(ckpt_dir, fname)
+            try:
+                ckpt = torch.load(fpath, map_location="cpu")
+                loss = ckpt.get("model_loss", None)
+                loss_val = None
+
+                if isinstance(loss, dict):
+                    # Pick the first available valid float/int: eval_loss, train_loss, loss, then any non-None value
+                    for key in ["eval_loss", "train_loss", "loss"]:
+                        v = loss.get(key)
+                        if isinstance(v, (float, int)) and v is not None:
+                            loss_val = v
+                            break
+                    # fallback: pick any first non-None value
+                    if loss_val is None and len(loss) > 0:
+                        for v in loss.values():
+                            if isinstance(v, (float, int)) and v is not None:
+                                loss_val = v
+                                break
+                elif isinstance(loss, (float, int)):
+                    loss_val = loss
+                else:
+                    print(f"⚠️ model_loss in {fname} is not usable: {loss}")
+
+                if loss_val is not None and isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+                else:
+                    print(f"⚠️ No valid loss found in {fname} (loss={loss}, extracted={loss_val})")
+            except Exception as e:
+                print(f"⚠️ Failed to process {fname}: {e}")
+
+    if not found_any:
+        print("\n❌ No checkpoint files found in directory:", ckpt_dir)
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No valid checkpoint found to select as best!")
+
+    """
+    Scan all checkpoints in ckpt_dir, find the one with the lowest eval_loss (or train_loss/loss as fallback),
+    and copy it to 'best_model.pth'.
+    """
+    best_loss = float("inf")
+    best_ckpt = None
+    found_any = False
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            found_any = True
+            fpath = os.path.join(ckpt_dir, fname)
+            try:
+                ckpt = torch.load(fpath, map_location="cpu")
+                loss = ckpt.get("model_loss", None)
+                loss_val = None
+
+                if isinstance(loss, dict):
+                    # Prefer eval_loss > train_loss > loss > any
+                    if "eval_loss" in loss:
+                        loss_val = loss["eval_loss"]
+                    elif "train_loss" in loss:
+                        loss_val = loss["train_loss"]
+                    elif "loss" in loss:
+                        loss_val = loss["loss"]
+                    elif len(loss) > 0:
+                        loss_val = list(loss.values())[0]
+                elif isinstance(loss, (float, int)):
+                    loss_val = loss
+                else:
+                    print(f"⚠️ model_loss in {fname} is not usable: {loss}")
+
+                if loss_val is not None and isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+                else:
+                    print(f"⚠️ No valid loss found in {fname} (loss={loss}, extracted={loss_val})")
+            except Exception as e:
+                print(f"⚠️ Failed to process {fname}: {e}")
+
+    if not found_any:
+        print("\n❌ No checkpoint files found in directory:", ckpt_dir)
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No valid checkpoint found to select as best!")
+
+    """
+    Scan all checkpoints in ckpt_dir, find the one with the lowest eval_loss (or train_loss/loss as fallback),
+    and copy it to 'best_model.pth'.
+    """
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            try:
+                ckpt = torch.load(fpath, map_location="cpu")
+                loss = ckpt.get("model_loss", None)
+                loss_val = None
+
+                if isinstance(loss, dict):
+                    # Prefer eval_loss > train_loss > loss > any
+                    if "eval_loss" in loss:
+                        loss_val = loss["eval_loss"]
+                    elif "train_loss" in loss:
+                        loss_val = loss["train_loss"]
+                    elif "loss" in loss:
+                        loss_val = loss["loss"]
+                    elif len(loss) > 0:
+                        loss_val = list(loss.values())[0]
+                elif isinstance(loss, (float, int)):
+                    loss_val = loss
+                else:
+                    continue  # unknown format
+
+                if loss_val is not None and isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+            except Exception as e:
+                print(f"⚠️ Failed to process {fname}: {e}")
+
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    """
+    Scan all checkpoints in ckpt_dir, find the one with the lowest eval_loss (or train_loss/loss as fallback),
+    and copy it to 'best_model.pth'.
+    """
+   
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            try:
+                ckpt = torch.load(fpath, map_location="cpu")
+                loss = ckpt.get("model_loss", None)
+                loss_val = None
+
+                if isinstance(loss, dict):
+                    # Prefer eval_loss > train_loss > loss > any
+                    if "eval_loss" in loss:
+                        loss_val = loss["eval_loss"]
+                    elif "train_loss" in loss:
+                        loss_val = loss["train_loss"]
+                    elif "loss" in loss:
+                        loss_val = loss["loss"]
+                    elif len(loss) > 0:
+                        loss_val = list(loss.values())[0]
+                elif isinstance(loss, (float, int)):
+                    loss_val = loss
+                else:
+                    continue  # unknown format
+
+                if loss_val is not None and isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+            except Exception as e:
+                print(f"⚠️ Failed to process {fname}: {e}")
+
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            loss = ckpt.get("model_loss")
+            # Safely extract the float loss value
+            if isinstance(loss, dict):
+                if "eval_loss" in loss:
+                    loss_val = loss["eval_loss"]
+                elif "train_loss" in loss:
+                    loss_val = loss["train_loss"]
+                elif "loss" in loss:
+                    loss_val = loss["loss"]
+                else:
+                    loss_val = list(loss.values())[0]
+            elif isinstance(loss, (float, int)):
+                loss_val = loss
+            else:
+                print(f"Skipping {fname} (unknown model_loss type: {type(loss)})")
+                continue
+            if isinstance(loss_val, (float, int)) and loss_val < best_loss:
+                best_loss = loss_val
+                best_ckpt = fpath
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    """Scan all checkpoints, find lowest eval_loss (or loss), save as best_model.pth"""
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            loss = ckpt.get("model_loss")
+            loss_val = None
+            if isinstance(loss, dict):
+                # Try to pick best loss metric
+                if "eval_loss" in loss:
+                    loss_val = loss["eval_loss"]
+                elif "loss" in loss:
+                    loss_val = loss["loss"]
+                elif "train_loss" in loss:
+                    loss_val = loss["train_loss"]
+                else:
+                    # fallback: pick first value
+                    loss_val = list(loss.values())[0]
+            elif isinstance(loss, (float, int)):
+                loss_val = loss
+            if isinstance(loss_val, (float, int)) and loss_val < best_loss:
+                best_loss = loss_val
+                best_ckpt = fpath
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    """Scan all checkpoints, find lowest eval_loss, save as best_model.pth"""
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            loss = ckpt.get("model_loss")
+            # Safely extract the float loss value
+            if isinstance(loss, dict):
+                # Prefer eval_loss, else train_loss, else pick first value
+                if "eval_loss" in loss:
+                    loss_val = loss["eval_loss"]
+                elif "train_loss" in loss:
+                    loss_val = loss["train_loss"]
+                elif "loss" in loss:
+                    loss_val = loss["loss"]
+                else:
+                    loss_val = list(loss.values())[0]
+            elif isinstance(loss, (float, int)):
+                loss_val = loss
+            else:
+                print(f"Skipping {fname} (unknown model_loss type: {type(loss)})")
+                continue
+            if isinstance(loss_val, (float, int)) and loss_val < best_loss:
+                best_loss = loss_val
+                best_ckpt = fpath
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    """Scan all checkpoints, find lowest eval_loss, save as best_model.pth"""
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            loss = ckpt.get("model_loss")
+            # Safely extract the float loss value
+            if isinstance(loss, dict):
+                # Prefer eval_loss, else train_loss, else skip
+                if "eval_loss" in loss:
+                    loss_val = loss["eval_loss"]
+                elif "train_loss" in loss:
+                    loss_val = loss["train_loss"]
+                else:
+                    print(f"Skipping {fname} (no eval_loss or train_loss)")
+                    continue
+            elif isinstance(loss, (float, int)):
+                loss_val = loss
+            else:
+                print(f"Skipping {fname} (unknown model_loss type: {type(loss)})")
+                continue
+            # Only now compare!
+            if loss_val < best_loss:
+                best_loss = loss_val
+                best_ckpt = fpath
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            if "model_loss" in ckpt:
+                loss_val = ckpt["model_loss"]
+                if isinstance(loss_val, dict):
+                    if "eval_loss" in loss_val:
+                        loss_val = loss_val["eval_loss"]
+                    elif "loss" in loss_val:
+                        loss_val = loss_val["loss"]
+                    else:
+                        loss_val = list(loss_val.values())[0]
+                if isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+                else:
+                    print(f"[Warning] Could not interpret model_loss in {fname}: {repr(loss_val)}")
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (eval_loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            if "model_loss" in ckpt:
+                loss_val = ckpt["model_loss"]
+                if isinstance(loss_val, dict):
+                    # Debug: print keys found
+                    print(f"[Debug] model_loss dict keys: {list(loss_val.keys())} in {fname}")
+                    # Try to get the main loss value
+                    if "loss" in loss_val:
+                        loss_val = loss_val["loss"]
+                    else:
+                        # Pick the first value as fallback
+                        loss_val = list(loss_val.values())[0]
+                if isinstance(loss_val, (float, int)):
+                    if loss_val < best_loss:
+                        best_loss = loss_val
+                        best_ckpt = fpath
+                else:
+                    print(f"[Warning] Could not interpret model_loss in {fname}: {repr(loss_val)}")
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
+
+    """Scan all checkpoints, find lowest model_loss, save as best_model.pth"""
+    best_loss = float("inf")
+    best_ckpt = None
+
+    for fname in os.listdir(ckpt_dir):
+        if fname.startswith("checkpoint_") and fname.endswith(".pth"):
+            fpath = os.path.join(ckpt_dir, fname)
+            ckpt = torch.load(fpath, map_location="cpu")
+            if "model_loss" in ckpt:
+                loss = ckpt["model_loss"]
+                if loss < best_loss:
+                    best_loss = loss
+                    best_ckpt = fpath
+    if best_ckpt:
+        shutil.copy2(best_ckpt, os.path.join(ckpt_dir, "best_model.pth"))
+        print(f"\n✅ Best checkpoint is {os.path.basename(best_ckpt)} (loss {best_loss:.4f})\nSaved as best_model.pth")
+    else:
+        print("\n❌ No checkpoint found to select as best!")
 
 def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_audio_length, max_text_length, lr, weight_decay, save_step):
     #  Logging parameters
@@ -49,18 +489,13 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
     DASHBOARD_LOGGER = "tensorboard"
     LOGGER_URI = None
 
-    # Set here the path that the checkpoints will be saved. Default: ./run/training/
-    # OUT_PATH = os.path.join(output_path, "run", "training")
     OUT_PATH = output_path
 
-    # Training Parameters
     OPTIMIZER_WD_ONLY_ON_WEIGHTS = True  # for multi-gpu training please make it False
-    START_WITH_EVAL = False  # if True it will star with evaluation
-    BATCH_SIZE = batch_size  # set here the batch size
-    GRAD_ACUMM_STEPS = grad_acumm  # set here the grad accumulation steps
+    START_WITH_EVAL = False
+    BATCH_SIZE = batch_size
+    GRAD_ACUMM_STEPS = grad_acumm
 
-
-    # Define here the dataset that you want to use for the fine-tuning on.
     DATASETS_CONFIG_LIST = []
     for metadata in metadatas:
         train_csv, eval_csv, language = metadata.split(",")
@@ -74,39 +509,31 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
             meta_file_val=os.path.basename(eval_csv),
             language=language,
         )
-
         DATASETS_CONFIG_LIST.append(config_dataset)
 
-    # Define the path where XTTS v2.0.1 files will be downloaded
     CHECKPOINTS_OUT_PATH = os.path.join(OUT_PATH, "XTTS_v2.0_original_model_files/")
     os.makedirs(CHECKPOINTS_OUT_PATH, exist_ok=True)
-
 
     # DVAE files
     DVAE_CHECKPOINT_LINK = "https://coqui.gateway.scarf.sh/hf-coqui/XTTS-v2/main/dvae.pth"
     MEL_NORM_LINK = "https://coqui.gateway.scarf.sh/hf-coqui/XTTS-v2/main/mel_stats.pth"
 
-    # Set the path to the downloaded files
     DVAE_CHECKPOINT = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(DVAE_CHECKPOINT_LINK))
     MEL_NORM_FILE = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(MEL_NORM_LINK))
 
-    # download DVAE files if needed
     if not os.path.isfile(DVAE_CHECKPOINT) or not os.path.isfile(MEL_NORM_FILE):
         print(" > Downloading DVAE files!")
         ModelManager._download_model_files([MEL_NORM_LINK, DVAE_CHECKPOINT_LINK], CHECKPOINTS_OUT_PATH, progress_bar=True)
-
 
     # Download XTTS v2.0 checkpoint if needed
     TOKENIZER_FILE_LINK = "https://coqui.gateway.scarf.sh/hf-coqui/XTTS-v2/main/vocab.json"
     XTTS_CHECKPOINT_LINK = "https://coqui.gateway.scarf.sh/hf-coqui/XTTS-v2/main/model.pth"
     XTTS_CONFIG_LINK = "https://coqui.gateway.scarf.sh/hf-coqui/XTTS-v2/main/config.json"
 
-    # XTTS transfer learning parameters: You we need to provide the paths of XTTS model checkpoint that you want to do the fine tuning.
-    TOKENIZER_FILE = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(TOKENIZER_FILE_LINK))  # vocab.json file
-    XTTS_CHECKPOINT = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(XTTS_CHECKPOINT_LINK))  # model.pth file
-    XTTS_CONFIG_FILE = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(XTTS_CONFIG_LINK))  # config.json file
+    TOKENIZER_FILE = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(TOKENIZER_FILE_LINK))
+    XTTS_CHECKPOINT = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(XTTS_CHECKPOINT_LINK))
+    XTTS_CONFIG_FILE = os.path.join(CHECKPOINTS_OUT_PATH, os.path.basename(XTTS_CONFIG_LINK))
 
-    # download XTTS v2.0 files if needed
     if not os.path.isfile(TOKENIZER_FILE):
         print(" > Downloading XTTS v2.0 tokenizer!")
         ModelManager._download_model_files(
@@ -123,16 +550,15 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
             [XTTS_CONFIG_LINK], CHECKPOINTS_OUT_PATH, progress_bar=True
         )
 
-    # init args and config
     model_args = GPTArgs(
-        max_conditioning_length=132300,  # 6 secs
-        min_conditioning_length=11025,  # 0.5 secs
+        max_conditioning_length=132300,
+        min_conditioning_length=11025,
         debug_loading_failures=False,
-        max_wav_length=max_audio_length,  # ~11.6 seconds
+        max_wav_length=max_audio_length,
         max_text_length=max_text_length,
         mel_norm_file=MEL_NORM_FILE,
         dvae_checkpoint=DVAE_CHECKPOINT,
-        xtts_checkpoint=XTTS_CHECKPOINT,  # checkpoint path of the model that you want to fine-tune
+        xtts_checkpoint=XTTS_CHECKPOINT,
         tokenizer_file=TOKENIZER_FILE,
         gpt_num_audio_tokens=1026,
         gpt_start_audio_token=1024,
@@ -140,14 +566,9 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
         gpt_use_masking_gt_prompt_approach=True,
         gpt_use_perceiver_resampler=True,
     )
-    # define audio config
     audio_config = XttsAudioConfig(sample_rate=22050, dvae_sample_rate=22050, output_sample_rate=24000)
-    # training parameters config
-
     config = GPTTrainerConfig()
-
     config.load_json(XTTS_CONFIG_FILE)
-
     config.epochs = num_epochs
     config.output_path = OUT_PATH
     config.model_args = model_args
@@ -177,10 +598,7 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
     config.lr_scheduler_params = {"milestones": [50000 * 18, 150000 * 18, 300000 * 18], "gamma": 0.5, "last_epoch": -1}
     config.test_sentences = []
 
-    # init the model from config
     model = GPTTrainer.init_from_config(config)
-
-    # load training samples
     train_samples, eval_samples = load_tts_samples(
         DATASETS_CONFIG_LIST,
         eval_split=True,
@@ -188,10 +606,9 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
         eval_split_size=config.eval_split_size,
     )
 
-    # init the trainer and 🚀
     trainer = Trainer(
         TrainerArgs(
-            restore_path=None,  # xtts checkpoint is restored via xtts_checkpoint key so no need of restore it using Trainer restore_path parameter
+            restore_path=None,
             skip_train_epoch=False,
             start_with_eval=START_WITH_EVAL,
             grad_accum_steps=GRAD_ACUMM_STEPS
@@ -204,14 +621,18 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
     )
     trainer.fit()
 
+    # === [NEW] Find and save best model after training
+    trainer_out_path = trainer.output_path
+    save_best_model(trainer_out_path)
+    # ===
+
     # get the longest text audio file to use as speaker reference
     samples_len = [len(item["text"].split(" ")) for item in train_samples]
-    longest_text_idx =  samples_len.index(max(samples_len))
+    longest_text_idx = samples_len.index(max(samples_len))
     speaker_ref = train_samples[longest_text_idx]["audio_file"]
-
+    
     trainer_out_path = trainer.output_path
 
-    # deallocate VRAM and RAM
     del model, trainer, train_samples, eval_samples
     gc.collect()
 
