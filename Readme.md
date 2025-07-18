@@ -56,6 +56,19 @@ wavs/clip_0000.wav|مرحبا|iraqi_speaker
 wavs/clip_0001.wav|أهلاً|iraqi_speaker
 ...
 ```
+## 5. DVAE Finetuning (Optional but Recommended)
+```bash
+!python train_dvae_xtts.py \
+--output_path=checkpoints/ \
+--train_csv_path=/content/XTTSV2Finetuning/metadata_train.csv \
+--eval_csv_path=/content/XTTSV2Finetuning/metadata_eval.csv \
+--language="ar" \
+--num_epochs=50 \
+--batch_size=512 \
+--lr=5e-6
+```
+> DVAE (Discrete Variational Autoencoder) is the speaker embedding module used in XTTSv2.
+> Finetuning it helps the model better capture the acoustic features and speaker characteristics of your own dataset, especially useful for underrepresented languages like Arabic or for new voices.
 
 ## 5. Start Training
 > Replace with your actual paths as needed:
