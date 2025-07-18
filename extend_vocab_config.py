@@ -6,6 +6,7 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
 import json
+import pandas as pd
 
 def combine_tokenizers(old_tokenizer, new_tokenizer, save_dir):
     # Load both the json files, take the union, and store it
@@ -57,6 +58,10 @@ def extend_tokenizer(args):
     new_tokenizer.pre_tokenizer = Whitespace()
 
     trainer = BpeTrainer(special_tokens=[f"[{args.language}]"], vocab_size=args.extended_vocab_size)
+    df = pd.read_csv(args.metadata_path, sep="|", header=0)
+
+    df["text"] = df["text"].astype(str)
+    texts = df["text"].dropna().tolist()
     new_tokenizer.train_from_iterator(iter(texts), trainer=trainer)
     new_tokenizer.add_special_tokens([f"[{args.language}]"])
 
