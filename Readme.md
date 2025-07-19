@@ -42,12 +42,12 @@ python download_checkpoint.py --output_path checkpoints/
 ## 4. Prepare Your Dataset
 ```bash
 For Example:
-iraqi1/
-  wavs/
-    clip_0000.wav
-    clip_0001.wav
-    ...
-  metadata.csv
+dataset/
+├── data/
+│   ├── train/
+│   └── eval/
+├── metadata_train.csv
+└── metadata_eval.csv
 ```
 > metadata.csv format:
 ```bash
